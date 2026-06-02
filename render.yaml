@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: ad-studio
+    env: docker
+    plan: starter
+    healthCheckPath: /

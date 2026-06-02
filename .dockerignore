@@ -1,0 +1,13 @@
+node_modules
+.output
+dist
+output
+.git
+.github
+.wrangler
+.playwright-cli
+.tanstack
+dev-*.log
+dev-*.err.log
+*.log
+.env
