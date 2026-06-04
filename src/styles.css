@@ -77,6 +77,39 @@
 }
 .animate-pulse-dot { animation: pulseDot 1.4s ease-in-out infinite; }
 
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideIn { from { opacity: 0; transform: translateX(4%); } to { opacity: 1; transform: translateX(0); } }
+@keyframes zoomIn { from { opacity: 0; transform: scale(1.08); } to { opacity: 1; transform: scale(1); } }
+
+/* Street Cut — sharp stepped fade with subtle shake */
+@keyframes streetCut {
+  0%   { opacity: 0; transform: translate3d(-2%, 0, 0); filter: contrast(1.4); }
+  50%  { opacity: 1; transform: translate3d(1%, 0, 0); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0); filter: contrast(1); }
+}
+
+/* Luxury Fade — slow, generous, slight zoom */
+@keyframes luxuryFade {
+  from { opacity: 0; transform: scale(1.04); filter: brightness(1.2); }
+  to   { opacity: 1; transform: scale(1); filter: brightness(1); }
+}
+
+/* Glitch Drop — RGB split style entrance */
+@keyframes glitchDrop {
+  0%   { opacity: 0; transform: translate3d(-3%, -2%, 0) skewX(-4deg); filter: hue-rotate(20deg) saturate(2); }
+  35%  { opacity: 1; transform: translate3d(2%, 1%, 0) skewX(2deg); filter: hue-rotate(-15deg) saturate(1.5); }
+  70%  { transform: translate3d(-1%, 0, 0) skewX(0deg); filter: hue-rotate(5deg) saturate(1.1); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0); filter: none; }
+}
+
+/* Hard Flash — overexposed white pop */
+@keyframes hardFlash {
+  0%   { opacity: 0; filter: brightness(4) saturate(0); }
+  20%  { opacity: 1; filter: brightness(2.5) saturate(0.5); }
+  60%  { filter: brightness(1.2) saturate(1.2); }
+  100% { opacity: 1; filter: brightness(1) saturate(1); }
+}
+
 @layer base {
   * { border-color: var(--color-border); }
   html, body { background-color: var(--color-background); color: var(--color-foreground); font-family: var(--font-sans); }

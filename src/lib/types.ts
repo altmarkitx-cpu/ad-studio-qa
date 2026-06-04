@@ -15,6 +15,7 @@ export interface BrandProfile {
   address?: string;
   imageCandidates: string[];
   selectedImages: string[];
+  imageAssets?: BrandImageAsset[];
 }
 
 export interface ScriptOutput {
@@ -25,6 +26,18 @@ export interface ScriptOutput {
   endCardText: string;
   voiceProfile: string;
   musicStyle: string;
+  visualAssetIds?: string[];
+}
+
+export interface BrandImageAsset {
+  id: string;
+  url: string;
+  alt?: string;
+  source?: string;
+  score?: number;
+  width?: number;
+  height?: number;
+  kind?: "hero" | "product" | "lifestyle" | "logo" | "detail" | "ugc" | "brand";
 }
 
 export interface AdVariantData {
@@ -35,10 +48,18 @@ export interface AdVariantData {
   scenes: Scene[];
 }
 
-export type TransitionType = "cut" | "fade" | "slide" | "zoom";
+export type TransitionType =
+  | "cut"
+  | "fade"
+  | "slide"
+  | "zoom"
+  | "street-cut"
+  | "luxury-fade"
+  | "glitch-drop"
+  | "hard-flash";
 export type SceneRole = "hook" | "product" | "proof" | "endcard";
 export type AdFormat = "16:9" | "9:16" | "1:1";
-export type ShotType = "lifestyle" | "product" | "detail" | "ugc" | "brand";
+export type ShotType = "hero" | "lifestyle" | "product" | "detail" | "ugc" | "brand";
 export type TransitionPreset = "street-cut" | "luxury-fade" | "glitch-drop" | "hard-flash";
 export type AdCategory =
   | "streetwear"
@@ -64,6 +85,7 @@ export interface Scene {
   shotType?: ShotType;
   transitionPreset?: TransitionPreset;
   imageUrl: string;
+  visualAssetId?: string;
   startSec: number;
   endSec: number;
   headline?: string;
@@ -75,7 +97,22 @@ export interface Scene {
   caption?: string;
   transitionType?: TransitionType;
   formatLayouts?: Partial<
-    Record<AdFormat, { textAnchor?: TextAnchor; imageX?: number; imageY?: number }>
+    Record<
+      AdFormat,
+      {
+        textAnchor?: TextAnchor;
+        imageX?: number;
+        imageY?: number;
+        imageScale?: number;
+        imageOpacity?: number;
+        imageFit?: "cover" | "contain";
+        textSize?: number;
+        subtitleSize?: number;
+        textColor?: string;
+        textAlign?: "left" | "center" | "right";
+        overlayOpacity?: number;
+      }
+    >
   >;
 }
 
@@ -85,6 +122,7 @@ export interface EndCard {
   phone?: string;
   address?: string;
   accentColor?: string;
+  backgroundColor?: string;
   logoUrl?: string;
   socialHandles?: {
     instagram?: string;
@@ -162,3 +200,25 @@ export const VOICE_PROFILES = [
   "Trustworthy & clear",
   "Friendly & casual",
 ] as const;
+
+export const SHOT_TYPES: ShotType[] = ["hero", "product", "detail", "lifestyle", "ugc"];
+
+export const SHOT_COLORS: Record<ShotType, string> = {
+  hero: "#f43f5e",
+  product: "#6366f1",
+  detail: "#06b6d4",
+  lifestyle: "#10b981",
+  ugc: "#f59e0b",
+  brand: "#a855f7",
+};
+
+export const TRANSITION_LABELS: Record<TransitionType, string> = {
+  cut: "Hard Cut",
+  fade: "Soft Fade",
+  slide: "Slide",
+  zoom: "Zoom",
+  "street-cut": "Street Cut",
+  "luxury-fade": "Luxury Fade",
+  "glitch-drop": "Glitch Drop",
+  "hard-flash": "Hard Flash",
+};

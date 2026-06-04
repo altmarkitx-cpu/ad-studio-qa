@@ -2,7 +2,7 @@ import * as cheerio from "cheerio";
 import type { BrandProfile } from "../types";
 import { extractFromHtml } from "./extract.server";
 
-const MAX_PAGES = 5;
+const MAX_PAGES = 3;
 
 export async function crawlAdditionalBrandAssets(args: {
   html: string;
@@ -34,6 +34,10 @@ export async function crawlAdditionalBrandAssets(args: {
       args.brand.selectedImages,
       brands.flatMap((brand) => brand.selectedImages),
     ).slice(0, 120),
+    imageAssets: mergeAssets(
+      args.brand.imageAssets ?? [],
+      brands.flatMap((brand) => brand.imageAssets ?? []),
+    ).slice(0, 160),
   };
 }
 
@@ -96,16 +100,22 @@ function scoreAssetPage(url: URL, text: string): number {
 
 async function fetchCrawlPage(url: string): Promise<{ html: string; finalUrl: string } | null> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 7000);
+  const timeout = setTimeout(() => controller.abort(), 8000);
   try {
     const response = await fetch(url, {
       redirect: "follow",
       signal: controller.signal,
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        Referer: new URL(url).origin,
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
       },
     });
     if (!response.ok) return null;
@@ -121,4 +131,19 @@ async function fetchCrawlPage(url: string): Promise<{ html: string; finalUrl: st
 
 function mergeImages(primary: string[], secondary: string[]): string[] {
   return Array.from(new Set([...primary, ...secondary].filter(Boolean)));
+}
+
+function mergeAssets(
+  primary: NonNullable<BrandProfile["imageAssets"]>,
+  secondary: NonNullable<BrandProfile["imageAssets"]>,
+): NonNullable<BrandProfile["imageAssets"]> {
+  const byUrl = new Map<string, NonNullable<BrandProfile["imageAssets"]>[number]>();
+  for (const asset of [...primary, ...secondary]) {
+    const existing = byUrl.get(asset.url);
+    if (!existing || (asset.score ?? 0) > (existing.score ?? 0)) byUrl.set(asset.url, asset);
+  }
+  return Array.from(byUrl.values()).map((asset, index) => ({
+    ...asset,
+    id: `asset-${String(index + 1).padStart(3, "0")}`,
+  }));
 }

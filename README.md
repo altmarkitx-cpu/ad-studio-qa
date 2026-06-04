@@ -5,35 +5,40 @@ A demo MVP that turns a business website URL into a ready-to-edit ad project.
 ## Architecture
 
 - **TanStack Start** (React 19, SSR) on Node
-- **Supabase** for persistence
-- **Lovable AI Gateway** (Gemini) for script generation
+- **Supabase** for production persistence
+- **Gemini** for script generation
 - **TanStack Query + Zustand** for client state
 
 ### Flow
-1. User pastes a URL on `/` → `createGenerationJob` server fn creates a row in `generation_jobs` and kicks off the pipeline.
-2. `/generate/$jobId` polls `getJob` and shows step-by-step progress.
-3. Pipeline runs server-side:
-   - `fetchSite.server.ts` — fetches HTML
-   - `extract.server.ts` — cheerio extracts metadata, brand, scored images, contact info
-   - `generateScript.server.ts` — Gemini structured JSON script
-   - `generateQr.server.ts` — `qrcode` data URL
-   - `assemble.server.ts` — builds `AdProject` with equal scene durations
-4. Project is inserted into `ad_projects`; user is redirected to `/editor/$projectId`.
-5. Editor (`EditorShell`) uses Zustand store with debounced autosave via `updateProject`.
 
-### Server module layout
-- `src/lib/ad.functions.ts` — thin file, only `createServerFn` declarations
-- `src/lib/server/*.server.ts` — server-only helpers (blocked from client bundle)
-- `src/lib/types.ts` — shared TS types
+1. User pastes a URL on `/`; `createGenerationJob` creates a `generation_jobs` row and runs the pipeline.
+2. `/generate/$jobId` polls `getJob` and shows progress.
+3. Pipeline runs server-side:
+   - `fetchSite.server.ts` fetches HTML with browser fallback for hard/lazy-loaded sites.
+   - `extract.server.ts` extracts metadata, brand, typed image assets, and contact info.
+   - `generateScript.server.ts` asks Gemini for structured JSON mapped to extracted visual assets.
+   - `generateQr.server.ts` creates the QR code data URL.
+   - `assemble.server.ts` builds the `AdProject` with equal scene durations and `visualAssetId` links.
+4. Project is inserted into `ad_projects`; user is redirected to `/editor/$projectId`.
+5. Editor uses Zustand with debounced autosave through `updateProject`.
+
+### Server Module Layout
+
+- `src/lib/ad.functions.ts` contains the `createServerFn` declarations.
+- `src/lib/server/*.server.ts` contains server-only helpers.
+- `src/lib/types.ts` contains shared TypeScript types.
 
 ### Fallbacks
-- Site fetch failure → uses `CAFE_MOCK` brand
-- AI failure → template script using brand name
-- Fewer than 5 images → padded from mock pool
+
+- Site fetch failure recovers from URL metadata, screenshot fallback, and category stock assets.
+- AI failure uses a template script with the extracted brand name.
+- Too few scene images are padded from the category fallback image pool.
+- Failed direct image materialization uses `/api/image?url=...` as a proxy fallback.
+- Production storage requires Supabase env vars; in-memory fallback is local/dev only.
 
 ## Deployment
 
-This app now runs as a standard Node server instead of a Cloudflare Worker.
+This app runs as a standard Node server. Railway is the preferred target.
 
 ### Local
 
@@ -52,24 +57,19 @@ docker run -p 3000:3000 --env-file .env ad-studio
 
 ### Railway
 
-- Connect the repo
-- Let Railway detect the `Dockerfile`
-- Add the Supabase and AI env vars
-- Set the start command to `node .output/server/index.mjs` if needed
+- Connect the repo or use `railway up`.
+- Use Dockerfile builder.
+- Use `npm start` as the start command.
+- Add the required Supabase and Gemini environment variables.
+- After deploy, open `/api/runtime` on the Railway URL. It should show `node22: true`, `expectedBuilder: "dockerfile"`, and `expectedStartCommand: "npm start"`.
 
-### Render
-
-- Create a new Web Service
-- Use the `render.yaml` or Dockerfile
-- Add the same environment variables
-
-### Required environment variables
+### Required Environment Variables
 
 - `SUPABASE_URL`
 - `SUPABASE_PUBLISHABLE_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `GEMINI_API_KEY` or the AI key your pipeline expects
+- `GEMINI_API_KEY`
 
 ## Notes
 
-The heavy generation pipeline now belongs on a normal Node host. That keeps the React app clean and avoids Cloudflare Worker resource limits.
+Existing broken projects are not repaired automatically. Regenerate the ad after deployment so scenes are rebuilt with the new asset-aware pipeline.

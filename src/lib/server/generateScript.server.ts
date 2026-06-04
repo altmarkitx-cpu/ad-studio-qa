@@ -1,4 +1,4 @@
-// Server-only: call Lovable AI Gateway for structured ad copy.
+// Server-only: call Gemini for structured ad copy.
 import type { BrandProfile, ScriptOutput } from "../types";
 import { detectBrandKind } from "./brandSignals.server";
 
@@ -7,10 +7,15 @@ Use only the provided brand information. Write concise, cinematic commercial cop
 Never output internal labels such as HERO HOOK, CORE FEATURE, DESIGNED FOR, SOCIAL PROOF, or AD.
 Avoid corporate filler. Prefer raw, specific, confident language that fits the brand category.
 For streetwear and fashion brands, use an underground, editorial tone instead of generic ecommerce copy.
-Return valid JSON only with keys: voiceoverScript, headline, cta, bottomBannerText, endCardText, voiceProfile, musicStyle.`;
+You are provided with the following real brand assets. You MUST prioritize these assets for the scenes.
+Only use a stock-image placeholder if no relevant real asset exists for a critical part of the script.
+You MUST only write copy that matches the visuals in the asset list.
+If no visual supports a point, make that scene typography-only with bold text and a brand-colored background.
+Return valid JSON only with keys: voiceoverScript, headline, cta, bottomBannerText, endCardText, voiceProfile, musicStyle, visualAssetIds.
+visualAssetIds must be an array of 4 asset IDs, one for each scene in order. Use "typography-only" when no matching visual exists.`;
 
 export async function generateAdScript(brand: BrandProfile): Promise<ScriptOutput> {
-  const apiKey = process.env.LOVABLE_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return fallbackScript(brand);
 
   const userPrompt = `Brand: ${brand.brandName}
@@ -19,29 +24,42 @@ Title: ${brand.metaTitle ?? ""}
 Description: ${brand.metaDescription ?? ""}
 Phone: ${brand.contactPhone ?? "(none)"}
 Address: ${brand.address ?? "(none)"}
+Image assets:
+${assetPromptList(brand)}
 
 Generate the ad JSON now.`;
 
   try {
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: SYSTEM_PROMPT }],
+          },
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: userPrompt }],
+            },
+          ],
+          generationConfig: {
+            responseMimeType: "application/json",
+            temperature: 0.7,
+          },
+        }),
       },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: userPrompt },
-        ],
-        response_format: { type: "json_object" },
-      }),
-    });
+    );
 
     if (!res.ok) throw new Error(`AI gateway ${res.status}`);
     const data = await res.json();
-    const text: string = data.choices?.[0]?.message?.content ?? "{}";
+    const text: string =
+      data.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text ?? "").join("") ??
+      "{}";
     const parsed = JSON.parse(text);
     return normalizeScript(parsed, brand);
   } catch (err) {
@@ -63,7 +81,54 @@ function normalizeScript(raw: unknown, brand: BrandProfile): ScriptOutput {
     endCardText: stripInternalLabels(String(input.endCardText ?? `Visit ${brand.brandName} today`)),
     voiceProfile: String(input.voiceProfile ?? "Cinematic & deep"),
     musicStyle: String(input.musicStyle ?? fallback.musicStyle),
+    visualAssetIds: normalizeVisualAssetIds(input.visualAssetIds, brand),
   };
+}
+
+function assetPromptList(brand: BrandProfile): string {
+  const assets =
+    brand.imageAssets?.slice(0, 40) ??
+    brand.selectedImages.slice(0, 20).map((url, index) => ({
+      id: `asset-${String(index + 1).padStart(3, "0")}`,
+      url,
+      kind: "brand",
+      alt: "",
+      source: "selected",
+    }));
+  if (assets.length === 0) return "- typography-only: no usable image assets were found";
+  return assets
+    .map((asset) => {
+      const description = [
+        asset.kind ? `kind=${asset.kind}` : "",
+        asset.alt ? `alt=${asset.alt}` : "",
+        asset.source ? `source=${asset.source}` : "",
+      ]
+        .filter(Boolean)
+        .join(", ");
+      return `- ${asset.id}: ${description || "brand visual"} | ${asset.url.slice(0, 180)}`;
+    })
+    .join("\n");
+}
+
+function normalizeVisualAssetIds(value: unknown, brand: BrandProfile): string[] {
+  const known = new Set((brand.imageAssets ?? []).map((asset) => asset.id));
+  if (!Array.isArray(value)) return fallbackAssetIds(brand);
+  const ids = value
+    .map((item) => String(item))
+    .map((item) => item.trim())
+    .filter((item) => item === "typography-only" || known.has(item))
+    .slice(0, 4);
+  return ids.length > 0 ? padAssetIds(ids, brand) : fallbackAssetIds(brand);
+}
+
+function fallbackAssetIds(brand: BrandProfile): string[] {
+  const ids = (brand.imageAssets ?? []).slice(0, 4).map((asset) => asset.id);
+  return padAssetIds(ids, brand);
+}
+
+function padAssetIds(ids: string[], brand: BrandProfile): string[] {
+  const fallback = brand.imageAssets?.[0]?.id ?? "typography-only";
+  return Array.from({ length: 4 }, (_, index) => ids[index] ?? fallback);
 }
 
 function fallbackScript(brand: BrandProfile): ScriptOutput {
@@ -77,6 +142,7 @@ function fallbackScript(brand: BrandProfile): ScriptOutput {
       endCardText: `${brand.brandName} - ${brand.websiteUrl}`,
       voiceProfile: "Cinematic & deep",
       musicStyle: "Dark electronic",
+      visualAssetIds: fallbackAssetIds(brand),
     };
   }
   if (kind === "fashion") {
@@ -88,6 +154,7 @@ function fallbackScript(brand: BrandProfile): ScriptOutput {
       endCardText: `${brand.brandName} - ${brand.websiteUrl}`,
       voiceProfile: "Cinematic & deep",
       musicStyle: "Fashion editorial",
+      visualAssetIds: fallbackAssetIds(brand),
     };
   }
   if (kind === "auto") {
@@ -99,6 +166,7 @@ function fallbackScript(brand: BrandProfile): ScriptOutput {
       endCardText: `${brand.brandName} - ${brand.websiteUrl}`,
       voiceProfile: "Cinematic & deep",
       musicStyle: "Modern commercial",
+      visualAssetIds: fallbackAssetIds(brand),
     };
   }
   if (kind === "grocery") {
@@ -110,6 +178,7 @@ function fallbackScript(brand: BrandProfile): ScriptOutput {
       endCardText: `${brand.brandName} - ${brand.websiteUrl}`,
       voiceProfile: "Warm & confident",
       musicStyle: "Bright local",
+      visualAssetIds: fallbackAssetIds(brand),
     };
   }
   return {
@@ -123,6 +192,7 @@ function fallbackScript(brand: BrandProfile): ScriptOutput {
     endCardText: `${brand.brandName} - ${brand.websiteUrl}`,
     voiceProfile: "Cinematic & deep",
     musicStyle: kind === "streetwear" ? "Lo-fi hip hop" : "Cinematic",
+    visualAssetIds: fallbackAssetIds(brand),
   };
 }
 

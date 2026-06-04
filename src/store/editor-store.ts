@@ -10,6 +10,8 @@ interface EditorState {
   activeSceneId: string | null;
   section: EditorSection;
   dirty: boolean;
+  time: number;
+  playing: boolean;
   past: Scene[][];
   future: Scene[][];
   variants: AdVariant[];
@@ -17,6 +19,11 @@ interface EditorState {
   setProject: (p: AdProject) => void;
   setSection: (s: EditorSection) => void;
   setActiveScene: (id: string) => void;
+  setTime: (time: number) => void;
+  setPlaying: (playing: boolean) => void;
+  togglePlaying: () => void;
+  seekToScene: (id: string) => void;
+  setActiveVariant: (id: string | null) => void;
   selectVariant: (id: string) => void;
   createVariant: (prompt?: string) => void;
   removeVariant: (id: string) => void;
@@ -34,6 +41,8 @@ export const useEditor = create<EditorState>((set) => ({
   activeSceneId: null,
   section: "slideshow",
   dirty: false,
+  time: 0,
+  playing: false,
   past: [],
   future: [],
   variants: [],
@@ -62,6 +71,8 @@ export const useEditor = create<EditorState>((set) => ({
     set({
       project: hydratedProject,
       activeSceneId: hydratedProject.scenes[0]?.id ?? null,
+      time: 0,
+      playing: false,
       dirty: false,
       past: [],
       future: [],
@@ -71,6 +82,30 @@ export const useEditor = create<EditorState>((set) => ({
   },
   setSection: (section) => set({ section }),
   setActiveScene: (id) => set({ activeSceneId: id }),
+  setTime: (time) =>
+    set((s) => {
+      const duration = s.project?.durationSec ?? 0;
+      const nextTime = Math.max(0, Math.min(duration || time, Number.isFinite(time) ? time : 0));
+      const scene =
+        s.project?.scenes.find((item) => nextTime >= item.startSec && nextTime < item.endSec) ??
+        s.project?.scenes.at(-1);
+      return { time: nextTime, activeSceneId: scene?.id ?? s.activeSceneId };
+    }),
+  setPlaying: (playing) => set({ playing }),
+  togglePlaying: () =>
+    set((s) => ({
+      playing: !s.playing,
+      time: s.project && s.time >= s.project.durationSec ? 0 : s.time,
+    })),
+  seekToScene: (id) =>
+    set((s) => {
+      const scene = s.project?.scenes.find((item) => item.id === id);
+      return {
+        activeSceneId: id,
+        time: scene?.startSec ?? s.time,
+      };
+    }),
+  setActiveVariant: (id) => set({ activeVariantId: id }),
   selectVariant: (id) =>
     set((s) => {
       if (!s.project) return s;
@@ -91,6 +126,8 @@ export const useEditor = create<EditorState>((set) => ({
         ),
         activeVariantId: id,
         activeSceneId: next.scenes[0]?.id ?? null,
+        time: 0,
+        playing: false,
         past: [],
         future: [],
         dirty: true,
@@ -116,6 +153,8 @@ export const useEditor = create<EditorState>((set) => ({
         variants: [...variants, variant],
         activeVariantId: variant.id,
         activeSceneId: variant.scenes[0]?.id ?? null,
+        time: 0,
+        playing: false,
         past: [],
         future: [],
         dirty: true,
@@ -147,6 +186,8 @@ export const useEditor = create<EditorState>((set) => ({
           ? {
               activeVariantId: next.id,
               activeSceneId: next.scenes[0]?.id ?? null,
+              time: 0,
+              playing: false,
               past: [],
               future: [],
             }
@@ -282,8 +323,7 @@ function createVariantFromProject(project: AdProject, index: number, prompt?: st
     ...scene,
     id: `variant-${index}-scene-${sceneIndex + 1}`,
     imageUrl: scenes[(sceneIndex + index) % scenes.length]?.imageUrl || scene.imageUrl,
-    transitionPreset:
-      sceneIndex % 3 === 0 ? "glitch-drop" : sceneIndex % 3 === 1 ? "luxury-fade" : "street-cut",
+    transitionPreset: "luxury-fade",
   }));
   const focus = variantFocus(index, project.brand.brandName);
   const script: ScriptOutput = {

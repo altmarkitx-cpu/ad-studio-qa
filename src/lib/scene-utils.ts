@@ -6,7 +6,7 @@ export function createImageScene(imageUrl: string, index: number): Scene {
     id: `scene-${crypto.randomUUID()}`,
     role: "product",
     shotType,
-    transitionPreset: transitionForShot(shotType),
+    transitionPreset: "luxury-fade",
     imageUrl,
     startSec: 0,
     endSec: 5,
@@ -94,8 +94,39 @@ export function inferShotType(imageUrl: string, index: number): ShotType {
 }
 
 export function transitionForShot(shotType: ShotType | undefined): TransitionPreset {
-  if (shotType === "detail") return "hard-flash";
-  if (shotType === "ugc") return "glitch-drop";
-  if (shotType === "brand") return "luxury-fade";
-  return "street-cut";
+  return "luxury-fade";
+}
+
+export function brandedFallbackImage(label: string, accent = "#f97316"): string {
+  const safeLabel = label.trim().slice(0, 28) || "AD STUDIO";
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 800" role="img" aria-label="${escapeXml(
+      safeLabel,
+    )}">
+      <defs>
+        <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="#050506"/>
+          <stop offset="55%" stop-color="#141416"/>
+          <stop offset="100%" stop-color="#09090a"/>
+        </linearGradient>
+      </defs>
+      <rect width="1400" height="800" fill="url(#g)"/>
+      <circle cx="1120" cy="170" r="210" fill="${accent}" fill-opacity=".14"/>
+      <circle cx="280" cy="620" r="240" fill="${accent}" fill-opacity=".08"/>
+      <text x="90" y="640" fill="rgba(255,255,255,.15)" font-family="Inter, Arial, sans-serif" font-size="118" font-weight="800">${escapeXml(
+        safeLabel,
+      )}</text>
+      <rect x="90" y="690" width="360" height="12" rx="6" fill="${accent}" fill-opacity=".72"/>
+    </svg>
+  `;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }

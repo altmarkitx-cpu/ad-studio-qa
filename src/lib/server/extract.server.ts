@@ -1,6 +1,32 @@
 // Server-only: parse HTML and build a BrandProfile.
 import * as cheerio from "cheerio";
-import type { BrandProfile } from "../types";
+import type { BrandImageAsset, BrandProfile } from "../types";
+
+type ImageCandidate = {
+  url: string;
+  score: number;
+  alt?: string;
+  source?: string;
+  width?: number;
+  height?: number;
+  kind?: BrandImageAsset["kind"];
+};
+
+const IMAGE_ATTRIBUTES = [
+  "src",
+  "data-src",
+  "data-original",
+  "data-lazy-src",
+  "data-master",
+  "data-image",
+  "data-image-url",
+  "data-bg",
+  "data-background",
+  "data-background-image",
+  "data-zoom-image",
+  "data-large-image",
+  "poster",
+] as const;
 
 function abs(base: string, href: string | undefined): string | null {
   if (!href) return null;
@@ -12,14 +38,25 @@ function abs(base: string, href: string | undefined): string | null {
 }
 
 function addImage(
-  images: { url: string; score: number }[],
+  images: ImageCandidate[],
   baseUrl: string,
   rawUrl: string | undefined,
   score: number,
+  meta: Omit<ImageCandidate, "url" | "score"> = {},
 ) {
-  const url = abs(baseUrl, cleanImageUrl(rawUrl));
+  const cleaned = cleanImageUrl(rawUrl);
+  if (!cleaned) return;
+  if (cleaned.startsWith("data:image/")) {
+    if (!/screenshot|capture|protected/i.test(`${meta.source ?? ""} ${rawUrl ?? ""}`) && score < 70) {
+      return;
+    }
+    images.push({ url: cleaned, score, ...meta });
+    return;
+  }
+  const url = abs(baseUrl, cleaned);
   if (!url || !isLikelyImage(url)) return;
-  images.push({ url, score });
+  if (isKnownTiny(meta.width, meta.height)) return;
+  images.push({ url, score, ...meta });
 }
 
 function cleanImageUrl(url: string | undefined): string | undefined {
@@ -43,12 +80,27 @@ function isLikelyImage(url: string): boolean {
   );
 }
 
-function parseSrcset(srcset: string | undefined): string[] {
+function parseSrcset(srcset: string | undefined): { url: string; width: number }[] {
   if (!srcset) return [];
   return srcset
     .split(",")
-    .map((candidate) => candidate.trim().split(/\s+/)[0])
-    .filter(Boolean);
+    .map((candidate) => {
+      const [url, descriptor = ""] = candidate.trim().split(/\s+/);
+      const width = descriptor.endsWith("w")
+        ? Number(descriptor.slice(0, -1))
+        : descriptor.endsWith("x")
+          ? Number(descriptor.slice(0, -1)) * 800
+          : 0;
+      return { url, width: Number.isFinite(width) ? width : 0 };
+    })
+    .filter((candidate) => Boolean(candidate.url))
+    .sort((a, b) => b.width - a.width);
+}
+
+function bestSrcsetUrl(srcset: string | undefined): { url: string; width?: number } | null {
+  const candidates = parseSrcset(srcset);
+  const best = candidates[0];
+  return best ? { url: best.url, width: best.width || undefined } : null;
 }
 
 function extractCssUrls(value: string | undefined): string[] {
@@ -56,17 +108,41 @@ function extractCssUrls(value: string | undefined): string[] {
   return Array.from(value.matchAll(/url\(([^)]+)\)/gi), (match) => match[1]);
 }
 
-function scoreImage(src: string, alt: string, w?: number, h?: number): number {
+function scoreImage(src: string, alt: string, w?: number, h?: number, source = ""): number {
   let score = 0;
-  if (w && h) score += Math.min((w * h) / 10000, 50);
-  if (w && w >= 600) score += 20;
+  const hintedWidth = w || getWidthHint(src);
+  const hintedHeight = h || getHeightHint(src);
+  if (hintedWidth && hintedHeight) score += Math.min((hintedWidth * hintedHeight) / 10000, 50);
+  if ((hintedWidth && hintedWidth > 800) || (hintedHeight && hintedHeight > 800)) score += 30;
+  else if (hintedWidth && hintedWidth >= 600) score += 20;
   if (alt && alt.length > 4) score += 10;
   const lower = src.toLowerCase();
-  if (/(hero|banner|cover|product|feature|lifestyle)/.test(lower)) score += 25;
-  if (/(logo|icon|sprite|favicon|avatar|pixel|tracking|placeholder)/.test(lower)) score -= 40;
+  if (/(hero|banner|cover)/.test(lower) || /hero|banner|cover/i.test(source)) score += 50;
+  if (/(product|shop|sku|item)/.test(lower) || /product|shop|sku|item/i.test(source)) score += 50;
+  if (/(lifestyle|lookbook|street|editorial|gallery)/.test(lower)) score += 50;
+  if (/(detail|texture|macro|close)/.test(lower)) score += 28;
+  if (/(favicon|icon|logo-small|sprite|avatar|pixel|tracking|tracker|placeholder)/.test(lower)) {
+    score -= 100;
+  }
+  if (/(logo|wordmark|brandmark)/.test(lower)) score -= 45;
   if (/\.svg($|\?)/.test(lower)) score -= 15;
   if (/(\.gif)($|\?)/.test(lower)) score -= 10;
   return score;
+}
+
+function inferImageKind(src: string, alt = "", source = ""): BrandImageAsset["kind"] {
+  const text = `${src} ${alt} ${source}`.toLowerCase();
+  if (/(logo|wordmark|brandmark|favicon)/.test(text)) return "logo";
+  if (/(hero|banner|cover|main)/.test(text)) return "hero";
+  if (/(product|shop|sku|item|pdp|catalog)/.test(text)) return "product";
+  if (/(detail|texture|macro|close|fabric|feature)/.test(text)) return "detail";
+  if (/(ugc|review|customer|testimonial|wearing)/.test(text)) return "ugc";
+  if (/(lifestyle|lookbook|editorial|street|gallery)/.test(text)) return "lifestyle";
+  return "brand";
+}
+
+function isKnownTiny(width?: number, height?: number): boolean {
+  return Boolean(width && height && (width < 200 || height < 200));
 }
 
 export function extractFromHtml(html: string, baseUrl: string): BrandProfile {
@@ -85,6 +161,7 @@ export function extractFromHtml(html: string, baseUrl: string): BrandProfile {
   const ogImage = abs(baseUrl, $('meta[property="og:image"]').attr("content"));
   const twitterImage = abs(baseUrl, $('meta[name="twitter:image"]').attr("content"));
   const itempropImage = abs(baseUrl, $('[itemprop="image"]').first().attr("content"));
+  const captureImage = $('meta[name="adstudio-screenshot"]').attr("content");
   const screenshotFallback = websiteScreenshotUrl(baseUrl);
   const favicon =
     abs(baseUrl, $('link[rel="icon"]').attr("href")) ||
@@ -125,35 +202,48 @@ export function extractFromHtml(html: string, baseUrl: string): BrandProfile {
     $("h1").first().text().trim() || $("h2").first().text().trim() || metaDescription;
 
   // Image candidates
-  const imageScores: { url: string; score: number }[] = [];
+  const imageScores: ImageCandidate[] = [];
   $("img").each((_, el) => {
-    const src = abs(
-      baseUrl,
-      cleanImageUrl(
-        $(el).attr("src") ||
-          $(el).attr("data-src") ||
-          $(el).attr("data-original") ||
-          $(el).attr("data-lazy-src") ||
-          $(el).attr("data-master"),
-      ),
-    );
-    if (!src) return;
     const alt = $(el).attr("alt") || "";
     const w = parseInt($(el).attr("width") || "0", 10) || undefined;
     const h = parseInt($(el).attr("height") || "0", 10) || undefined;
-    imageScores.push({ url: src, score: scoreImage(src, alt, w, h) });
-    for (const srcsetUrl of parseSrcset($(el).attr("srcset") || $(el).attr("data-srcset"))) {
-      addImage(imageScores, baseUrl, srcsetUrl, scoreImage(srcsetUrl, alt, w, h) + 5);
+    const source = `${$(el).attr("class") || ""} ${$(el).attr("id") || ""}`;
+    for (const attr of IMAGE_ATTRIBUTES) {
+      const raw = $(el).attr(attr);
+      const score = scoreImage(raw ?? "", alt, w, h, `${source} ${attr}`);
+      addImage(imageScores, baseUrl, raw, score, {
+        alt,
+        source: `img:${attr}`,
+        width: w,
+        height: h,
+        kind: inferImageKind(raw ?? "", alt, source),
+      });
+    }
+    const best = bestSrcsetUrl($(el).attr("srcset") || $(el).attr("data-srcset"));
+    if (best) {
+      addImage(imageScores, baseUrl, best.url, scoreImage(best.url, alt, best.width, h, source) + 10, {
+        alt,
+        source: "img:srcset",
+        width: best.width,
+        height: h,
+        kind: inferImageKind(best.url, alt, source),
+      });
     }
   });
 
   $("source").each((_, el) => {
-    for (const srcsetUrl of parseSrcset($(el).attr("srcset") || $(el).attr("data-srcset"))) {
+    const best = bestSrcsetUrl($(el).attr("srcset") || $(el).attr("data-srcset"));
+    if (best) {
       addImage(
         imageScores,
         baseUrl,
-        srcsetUrl,
-        scoreImage(srcsetUrl, "", undefined, undefined) + 5,
+        best.url,
+        scoreImage(best.url, "", best.width, undefined, "picture source") + 12,
+        {
+          source: "picture:source",
+          width: best.width,
+          kind: inferImageKind(best.url, "", "picture source"),
+        },
       );
     }
   });
@@ -162,48 +252,71 @@ export function extractFromHtml(html: string, baseUrl: string): BrandProfile {
     'link[rel="preload"][as="image"], link[rel="image_src"], link[rel="preload"][type^="image/"]',
   ).each((_, el) => {
     addImage(imageScores, baseUrl, $(el).attr("href"), 60);
-    for (const srcsetUrl of parseSrcset($(el).attr("imagesrcset"))) {
-      addImage(imageScores, baseUrl, srcsetUrl, 65);
+    const best = bestSrcsetUrl($(el).attr("imagesrcset"));
+    if (best) {
+      addImage(imageScores, baseUrl, best.url, 70, {
+        source: "link:imagesrcset",
+        width: best.width,
+        kind: inferImageKind(best.url, "", "preload"),
+      });
     }
   });
 
   $("[style]").each((_, el) => {
     for (const cssUrl of extractCssUrls($(el).attr("style"))) {
-      addImage(imageScores, baseUrl, cssUrl, 30);
+      addImage(imageScores, baseUrl, cssUrl, 34, {
+        source: "style-attribute",
+        kind: inferImageKind(cssUrl, "", $(el).attr("class") || ""),
+      });
     }
   });
 
   $("style").each((_, el) => {
     for (const cssUrl of extractCssUrls($(el).text())) {
-      addImage(imageScores, baseUrl, cssUrl, 28);
+      addImage(imageScores, baseUrl, cssUrl, 32, {
+        source: "style-tag",
+        kind: inferImageKind(cssUrl, "", "css"),
+      });
     }
   });
 
-  $("[data-bg], [data-background], [data-image], [data-image-url]").each((_, el) => {
-    addImage(imageScores, baseUrl, $(el).attr("data-bg"), 35);
-    addImage(imageScores, baseUrl, $(el).attr("data-background"), 35);
-    addImage(imageScores, baseUrl, $(el).attr("data-image"), 35);
-    addImage(imageScores, baseUrl, $(el).attr("data-image-url"), 35);
+  $("*").each((_, el) => {
+    const source = `${$(el).prop("tagName") || ""} ${$(el).attr("class") || ""} ${$(el).attr("id") || ""}`;
+    for (const attr of IMAGE_ATTRIBUTES) {
+      if (attr === "src") continue;
+      const raw = $(el).attr(attr);
+      addImage(imageScores, baseUrl, raw, scoreImage(raw ?? "", "", undefined, undefined, source), {
+        source: `attr:${attr}`,
+        kind: inferImageKind(raw ?? "", "", source),
+      });
+    }
   });
 
   $('script[type="application/ld+json"]').each((_, el) => {
     for (const url of extractJsonImageUrls($(el).text())) {
-      addImage(imageScores, baseUrl, url, 74);
+      addImage(imageScores, baseUrl, url, 78, {
+        source: "json-ld",
+        kind: inferImageKind(url, "", "json-ld"),
+      });
     }
   });
-  if (ogImage) imageScores.push({ url: ogImage, score: 100 });
-  if (twitterImage) imageScores.push({ url: twitterImage, score: 96 });
-  if (itempropImage) imageScores.push({ url: itempropImage, score: 94 });
-  imageScores.push({ url: screenshotFallback, score: 92 });
-
+  if (ogImage) imageScores.push({ url: ogImage, score: 125, source: "meta:og:image", kind: "hero" });
+  if (twitterImage)
+    imageScores.push({ url: twitterImage, score: 120, source: "meta:twitter:image", kind: "hero" });
+  if (itempropImage)
+    imageScores.push({ url: itempropImage, score: 112, source: "itemprop:image", kind: "product" });
+  if (captureImage) imageScores.push({ url: captureImage, score: 135, source: "meta:adstudio-screenshot", kind: "hero" });
   for (const url of extractImageUrlsFromText(html)) {
-    addImage(imageScores, baseUrl, url, scoreImage(url, "", undefined, undefined) + 12);
+    addImage(imageScores, baseUrl, url, scoreImage(url, "", undefined, undefined, "text") + 12, {
+      source: "html-text",
+      kind: inferImageKind(url, "", "html-text"),
+    });
   }
 
   // Dedupe + sort. Shopify often repeats the same image at many widths.
-  const bestByImage = new Map<string, { url: string; score: number }>();
+  const bestByImage = new Map<string, ImageCandidate>();
   for (const image of imageScores) {
-    if (image.score <= -10) continue;
+    if (image.score <= 0) continue;
     const key = canonicalImageKey(image.url);
     const existing = bestByImage.get(key);
     if (
@@ -216,8 +329,26 @@ export function extractFromHtml(html: string, baseUrl: string): BrandProfile {
   }
   const sorted = Array.from(bestByImage.values()).sort((a, b) => b.score - a.score);
 
-  const imageCandidates = sorted.map((s) => s.url);
-  const selectedImages = sorted.map((s) => s.url).slice(0, 80);
+  const realSorted = sorted.filter((asset) => asset.source !== "screenshot" && asset.score > 0);
+  const fallbackScreenshotAsset: ImageCandidate = {
+    url: screenshotFallback,
+    score: 1,
+    source: "screenshot-fallback",
+    kind: "hero",
+  };
+  const finalAssets = realSorted.length > 0 ? realSorted : [fallbackScreenshotAsset];
+  const imageCandidates = finalAssets.map((s) => s.url);
+  const selectedImages = finalAssets.map((s) => s.url).slice(0, 80);
+  const imageAssets = finalAssets.slice(0, 120).map((asset, index) => ({
+    id: `asset-${String(index + 1).padStart(3, "0")}`,
+    url: asset.url,
+    alt: asset.alt,
+    source: asset.source,
+    score: Math.round(asset.score),
+    width: asset.width,
+    height: asset.height,
+    kind: asset.kind ?? inferImageKind(asset.url, asset.alt, asset.source),
+  }));
 
   // Contact info
   const bodyText = $("body").text().replace(/\s+/g, " ").slice(0, 8000);
@@ -242,6 +373,7 @@ export function extractFromHtml(html: string, baseUrl: string): BrandProfile {
     contactPhone,
     address,
     imageCandidates,
+    imageAssets,
     selectedImages: selectedImages.length > 0 ? selectedImages : [screenshotFallback],
   };
 }
@@ -269,13 +401,22 @@ function getWidthHint(url: string): number {
   }
 }
 
+function getHeightHint(url: string): number {
+  try {
+    const parsed = new URL(url);
+    return Number(parsed.searchParams.get("height") || parsed.searchParams.get("h") || 0);
+  } catch {
+    const match = url.match(/[?&](?:height|h)=(\d+)/i);
+    return match ? Number(match[1]) : 0;
+  }
+}
+
 function extractImageUrlsFromText(html: string): string[] {
   const urls = new Set<string>();
   const patterns = [
     /https?:\\?\/\\?\/[^"'\\\s<>)]+?\.(?:avif|gif|jpe?g|png|webp)(?:\?[^"'\\\s<>)]+)?/gi,
     /\/\/[^"'\\\s<>)]+?\.(?:avif|gif|jpe?g|png|webp)(?:\?[^"'\\\s<>)]+)?/gi,
     /\/cdn\/shop\/files\/[^"'\\\s<>)]+/gi,
-    /https?:\\?\/\\?\/[^"'\\\s<>)]+?(?:cdn-images|image\.|images\.|assets\.|media\.|static\.)[^"'\\\s<>)]+/gi,
   ];
   for (const pattern of patterns) {
     for (const match of html.matchAll(pattern)) {

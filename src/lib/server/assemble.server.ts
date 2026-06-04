@@ -1,5 +1,5 @@
 // Server-only: assemble final AdProject from brand + script + qr.
-import type { AdProject, BrandProfile, EndCard, Scene, ScriptOutput } from "../types";
+import type { AdProject, BrandProfile, EndCard, Scene, ScriptOutput, ShotType } from "../types";
 import { classifyShot, inferAdCategory, inferAdTemplate } from "./classify.server";
 import { detectBrandKind } from "./brandSignals.server";
 
@@ -10,9 +10,10 @@ export function assembleProject(args: {
   script: ScriptOutput;
   qrCodeDataUrl: string;
   durationSec?: number;
+  shotTypes?: ShotType[];
 }): AdProject {
   const duration = args.durationSec ?? 20;
-  const images = pickSceneImages(args.brand);
+  const images = pickSceneImages(args.brand, args.script.visualAssetIds);
   const kind = detectBrandKind(args.brand);
   const streetwear = kind === "streetwear";
   const fashion = kind === "fashion";
@@ -22,14 +23,16 @@ export function assembleProject(args: {
   const adCategory = inferAdCategory(args.brand);
   const adTemplate = inferAdTemplate(adCategory);
   const captions = captionsFromScript(args.script.voiceoverScript, 4);
+  const shotTypes = normalizeShotTypes(args.shotTypes);
 
   const scenes: Scene[] = [
     {
       id: "scene-hook",
       role: "hook",
-      imageUrl: images[0] ?? images[1] ?? websiteScreenshotUrl(args.brand.websiteUrl),
-      shotType: classifyShot(images[0] ?? images[1] ?? args.brand.websiteUrl, 0),
-      transitionPreset: "street-cut",
+      imageUrl: images[0]?.url ?? images[1]?.url ?? websiteScreenshotUrl(args.brand.websiteUrl),
+      visualAssetId: images[0]?.id,
+      shotType: shotTypes[0] ?? classifyShot(images[0]?.url ?? images[1]?.url ?? args.brand.websiteUrl, 0),
+      transitionPreset: "luxury-fade",
       startSec: 0,
       endSec: 5,
       headline: streetwear ? "Drape Different" : punchyHeadline(args.script.headline, args.brand),
@@ -51,9 +54,10 @@ export function assembleProject(args: {
     {
       id: "scene-product",
       role: "product",
-      imageUrl: images[1] ?? images[0] ?? websiteScreenshotUrl(args.brand.websiteUrl),
-      shotType: classifyShot(images[1] ?? images[0] ?? args.brand.websiteUrl, 1),
-      transitionPreset: "hard-flash",
+      imageUrl: images[1]?.url ?? images[0]?.url ?? websiteScreenshotUrl(args.brand.websiteUrl),
+      visualAssetId: images[1]?.id,
+      shotType: shotTypes[1] ?? classifyShot(images[1]?.url ?? images[0]?.url ?? args.brand.websiteUrl, 1),
+      transitionPreset: "luxury-fade",
       startSec: 5,
       endSec: 10,
       headline: streetwear
@@ -100,9 +104,11 @@ export function assembleProject(args: {
     {
       id: "scene-proof",
       role: "proof",
-      imageUrl: images[2] ?? images[1] ?? images[0] ?? websiteScreenshotUrl(args.brand.websiteUrl),
-      shotType: classifyShot(images[2] ?? images[1] ?? images[0] ?? args.brand.websiteUrl, 2),
-      transitionPreset: "glitch-drop",
+      imageUrl:
+        images[2]?.url ?? images[1]?.url ?? images[0]?.url ?? websiteScreenshotUrl(args.brand.websiteUrl),
+      visualAssetId: images[2]?.id,
+      shotType: shotTypes[2] ?? classifyShot(images[2]?.url ?? images[1]?.url ?? images[0]?.url ?? args.brand.websiteUrl, 2),
+      transitionPreset: "luxury-fade",
       startSec: 10,
       endSec: 15,
       headline: streetwear ? "50,000+ Draped. 4.9★ Rating." : "Loved By Customers.",
@@ -125,8 +131,10 @@ export function assembleProject(args: {
     {
       id: "scene-endcard",
       role: "endcard",
-      imageUrl: images[3] ?? images[2] ?? images[1] ?? websiteScreenshotUrl(args.brand.websiteUrl),
-      shotType: classifyShot(images[3] ?? images[2] ?? images[1] ?? args.brand.websiteUrl, 3),
+      imageUrl:
+        images[3]?.url ?? images[2]?.url ?? images[1]?.url ?? websiteScreenshotUrl(args.brand.websiteUrl),
+      visualAssetId: images[3]?.id,
+      shotType: shotTypes[3] ?? classifyShot(images[3]?.url ?? images[2]?.url ?? images[1]?.url ?? args.brand.websiteUrl, 3),
       transitionPreset: "luxury-fade",
       startSec: 15,
       endSec: 20,
@@ -143,6 +151,7 @@ export function assembleProject(args: {
     phone: args.brand.contactPhone,
     address: args.brand.address,
     accentColor: args.brand.accentColor ?? inferAccent(args.brand),
+    backgroundColor: "#050505",
     logoUrl: args.brand.logoUrl,
     socialHandles: args.brand.socialHandles,
     enabled: true,
@@ -173,22 +182,45 @@ export function assembleProject(args: {
   };
 }
 
-function pickSceneImages(brand: BrandProfile): string[] {
+function normalizeShotTypes(values?: ShotType[]): ShotType[] {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((value) => (value === "lifestyle" || value === "product" || value === "detail" || value === "ugc" || value === "brand" ? value : null))
+    .filter((value): value is ShotType => Boolean(value))
+    .slice(0, 4);
+}
+
+function pickSceneImages(
+  brand: BrandProfile,
+  visualAssetIds: string[] = [],
+): { id?: string; url: string }[] {
   const screenshot = websiteScreenshotUrl(brand.websiteUrl);
-  const trusted = Array.from(
-    new Set([screenshot, ...brand.selectedImages, ...brand.imageCandidates].filter(Boolean)),
+  const assetById = new Map((brand.imageAssets ?? []).map((asset) => [asset.id, asset]));
+  const mapped = visualAssetIds
+    .map((id) => (id === "typography-only" ? null : assetById.get(id)))
+    .filter((asset): asset is NonNullable<BrandProfile["imageAssets"]>[number] => Boolean(asset))
+    .filter((asset) => !isLogoLike(asset.url))
+    .map((asset) => ({ id: asset.id, url: asset.url }));
+  const trusted = Array.from(new Set([screenshot, ...brand.selectedImages, ...brand.imageCandidates].filter(Boolean)));
+  const trustedVisuals = trusted
+    .filter((url) => isScreenshotUrl(url) || !isLogoLike(url))
+    .map((url) => ({
+      id: brand.imageAssets?.find((asset) => asset.url === url)?.id,
+      url,
+    }));
+  const merged = [...mapped, ...trustedVisuals].filter(
+    (item, index, arr) => arr.findIndex((candidate) => candidate.url === item.url) === index,
   );
-  const trustedVisuals = trusted.filter((url) => isScreenshotUrl(url) || !isLogoLike(url));
-  const realImages = trustedVisuals.filter((url) => !isScreenshotUrl(url));
-  const out = (realImages.length >= 1 ? realImages : trustedVisuals).slice(0, 4);
+  const realImages = merged.filter((item) => !isScreenshotUrl(item.url));
+  const out = (realImages.length >= 1 ? realImages : merged).slice(0, 4);
   if (out.length > 0) {
-    const firstReal = realImages[0] ?? out[0] ?? screenshot;
+    const firstReal = realImages[0] ?? out[0] ?? { url: screenshot };
     const secondReal = realImages[1] ?? out[1] ?? firstReal;
     const thirdReal = realImages[2] ?? out[2] ?? secondReal;
     const fourthReal = realImages[3] ?? out[3] ?? thirdReal;
-    return [firstReal, secondReal, thirdReal, fourthReal].filter(Boolean);
+    return [firstReal, secondReal, thirdReal, fourthReal].filter((item) => Boolean(item.url));
   }
-  return [screenshot, screenshot, screenshot, screenshot];
+  return [{ url: screenshot }, { url: screenshot }, { url: screenshot }, { url: screenshot }];
 }
 
 function websiteScreenshotUrl(url: string): string {

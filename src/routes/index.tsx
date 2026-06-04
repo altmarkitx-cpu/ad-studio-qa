@@ -63,7 +63,8 @@ function Landing() {
       }
       await navigate({ to: "/generate/$jobId", params: { jobId } });
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Failed to start generation");
+      const message = e instanceof Error ? e.message : String(e);
+      setErr(sanitizeUiError(message));
       setBusy(false);
     }
   };
@@ -146,6 +147,15 @@ function Landing() {
       </main>
     </div>
   );
+}
+
+function sanitizeUiError(message: string): string {
+  const trimmed = message.trim();
+  if (!trimmed) return "Failed to start generation";
+  if (/<(?:!doctype|html|head|body|script|style)\b/i.test(trimmed)) {
+    return "Failed to load this website. Try another URL or a homepage that responds cleanly.";
+  }
+  return trimmed.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function Feature({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {

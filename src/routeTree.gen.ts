@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as GenerateJobIdRouteImport } from './routes/generate.$jobId'
 import { Route as EditorProjectIdRouteImport } from './routes/editor.$projectId'
+import { Route as ApiRuntimeRouteImport } from './routes/api.runtime'
 import { Route as ApiImageRouteImport } from './routes/api.image'
 import { Route as ApiAudioRouteImport } from './routes/api.audio'
 
@@ -30,6 +31,11 @@ const EditorProjectIdRoute = EditorProjectIdRouteImport.update({
   path: '/editor/$projectId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiRuntimeRoute = ApiRuntimeRouteImport.update({
+  id: '/api/runtime',
+  path: '/api/runtime',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiImageRoute = ApiImageRouteImport.update({
   id: '/api/image',
   path: '/api/image',
@@ -45,6 +51,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/api/audio': typeof ApiAudioRoute
   '/api/image': typeof ApiImageRoute
+  '/api/runtime': typeof ApiRuntimeRoute
   '/editor/$projectId': typeof EditorProjectIdRoute
   '/generate/$jobId': typeof GenerateJobIdRoute
 }
@@ -52,6 +59,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/audio': typeof ApiAudioRoute
   '/api/image': typeof ApiImageRoute
+  '/api/runtime': typeof ApiRuntimeRoute
   '/editor/$projectId': typeof EditorProjectIdRoute
   '/generate/$jobId': typeof GenerateJobIdRoute
 }
@@ -60,6 +68,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/api/audio': typeof ApiAudioRoute
   '/api/image': typeof ApiImageRoute
+  '/api/runtime': typeof ApiRuntimeRoute
   '/editor/$projectId': typeof EditorProjectIdRoute
   '/generate/$jobId': typeof GenerateJobIdRoute
 }
@@ -69,6 +78,7 @@ export interface FileRouteTypes {
     | '/'
     | '/api/audio'
     | '/api/image'
+    | '/api/runtime'
     | '/editor/$projectId'
     | '/generate/$jobId'
   fileRoutesByTo: FileRoutesByTo
@@ -76,6 +86,7 @@ export interface FileRouteTypes {
     | '/'
     | '/api/audio'
     | '/api/image'
+    | '/api/runtime'
     | '/editor/$projectId'
     | '/generate/$jobId'
   id:
@@ -83,6 +94,7 @@ export interface FileRouteTypes {
     | '/'
     | '/api/audio'
     | '/api/image'
+    | '/api/runtime'
     | '/editor/$projectId'
     | '/generate/$jobId'
   fileRoutesById: FileRoutesById
@@ -91,6 +103,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApiAudioRoute: typeof ApiAudioRoute
   ApiImageRoute: typeof ApiImageRoute
+  ApiRuntimeRoute: typeof ApiRuntimeRoute
   EditorProjectIdRoute: typeof EditorProjectIdRoute
   GenerateJobIdRoute: typeof GenerateJobIdRoute
 }
@@ -118,6 +131,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EditorProjectIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/runtime': {
+      id: '/api/runtime'
+      path: '/api/runtime'
+      fullPath: '/api/runtime'
+      preLoaderRoute: typeof ApiRuntimeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/image': {
       id: '/api/image'
       path: '/api/image'
@@ -139,6 +159,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApiAudioRoute: ApiAudioRoute,
   ApiImageRoute: ApiImageRoute,
+  ApiRuntimeRoute: ApiRuntimeRoute,
   EditorProjectIdRoute: EditorProjectIdRoute,
   GenerateJobIdRoute: GenerateJobIdRoute,
 }
